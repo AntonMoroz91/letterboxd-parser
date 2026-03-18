@@ -85,5 +85,4 @@ python letterboxd_parser.py
 ## Автор
 Anton Moroz
 
-## Лицензия
-MIT
+
