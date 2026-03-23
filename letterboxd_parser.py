@@ -1,12 +1,12 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import time
+import re
 from typing import List, Dict
 
 def collect_user_rates_rss(user_login: str) -> List[Dict[str, str]]:
     """
-    Парсит RSS-ленту пользователя Letterboxd (не блокируется).
+    Парсит RSS-ленту пользователя Letterboxd.
     """
     url = f'https://letterboxd.com/{user_login}/rss/'
     data = []
@@ -15,19 +15,19 @@ def collect_user_rates_rss(user_login: str) -> List[Dict[str, str]]:
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
-    print(f"Парсинг RSS пользователя: {user_login}")
+    print(f"📡 Парсинг RSS пользователя: {user_login}")
     
     try:
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code != 200:
-            print(f"Ошибка {response.status_code}")
+            print(f"❌ Ошибка {response.status_code}")
             return []
         
         soup = BeautifulSoup(response.text, 'xml')
         items = soup.find_all('item')
         
-        print(f"Найдено записей в RSS: {len(items)}")
+        print(f"📄 Найдено записей в RSS: {len(items)}")
         
         for item in items:
             # Название фильма
@@ -36,54 +36,68 @@ def collect_user_rates_rss(user_login: str) -> List[Dict[str, str]]:
                 continue
             film_name = title.text.strip()
             
-            # Извлекаем год из названия или описания
+            # Извлекаем год из названия
             year = ""
-            description = item.find('description')
-            if description and description.text:
-                import re
-                match = re.search(r'\b(19|20)\d{2}\b', description.text)
-                if match:
-                    year = match.group()
+            year_match = re.search(r'\((\d{4})\)', film_name)
+            if year_match:
+                year = year_match.group(1)
+                # Убираем год из названия
+                film_name = re.sub(r'\s*\(\d{4}\)', '', film_name)
             
-            # Извлекаем оценку из описания (звезды)
+            # Извлекаем оценку из description (ищем звезды)
+            description = item.find('description')
             rating = None
+            
             if description and description.text:
-                stars = description.text.count('★')
+                desc_text = description.text
+                # Ищем звезды (★)
+                stars = desc_text.count('★')
                 if stars > 0:
                     rating = str(stars)
-                elif '½' in description.text:
+                # Проверяем половину звезды
+                elif '½' in desc_text:
                     rating = '0.5'
+                # Если звезд нет, ищем число после "Rated "
+                else:
+                    rated_match = re.search(r'Rated\s+(\d+)/?', desc_text, re.IGNORECASE)
+                    if rated_match:
+                        rating = rated_match.group(1)
             
+            # Добавляем только записи с оценкой
             if rating:
                 data.append({
                     'film_name': film_name,
                     'release_year': year,
                     'rating': rating
                 })
+                print(f"   ✅ {film_name} ({year}) — {rating}/10")
+            else:
+                print(f"   ⚠️ {film_name} — без оценки")
         
         return data
         
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"⚠️ Ошибка: {e}")
         return []
 
 def save_to_csv(data: List[Dict[str, str]], filename: str) -> None:
     if data:
-        pd.DataFrame(data).to_csv(filename, index=False, encoding='utf-8')
-        print(f"✅ Сохранено в {filename}")
+        df = pd.DataFrame(data)
+        df.to_csv(filename, index=False, encoding='utf-8')
+        print(f"\n💾 Сохранено в {filename}")
+        print(f"   Всего записей: {len(data)}")
     else:
         print("Нет данных для сохранения")
 
 def save_to_excel(data: List[Dict[str, str]], filename: str) -> None:
     if data:
-        pd.DataFrame(data).to_excel(filename, index=False)
-        print(f"✅ Сохранено в {filename}")
-    else:
-        print("Нет данных для сохранения")
+        df = pd.DataFrame(data)
+        df.to_excel(filename, index=False)
+        print(f"💾 Сохранено в {filename}")
 
 if __name__ == "__main__":
     print("="*50)
-    print("ПАРСЕР LETTERBOXD (RSS - не блокируется)")
+    print("🎬 ПАРСЕР ОЦЕНОК LETTERBOXD (RSS)")
     print("="*50)
     
     USER_LOGIN = "rfeldman9"
@@ -100,11 +114,12 @@ if __name__ == "__main__":
             print(f"{i+1}. {r['film_name']} ({r['release_year']}) — {r['rating']}/10")
         
         # Статистика
-        if len(ratings) > 0:
-            df = pd.DataFrame(ratings)
-            df['rating'] = pd.to_numeric(df['rating'])
-            print(f"\n📈 Средняя оценка: {df['rating'].mean():.2f}/10")
+        df = pd.DataFrame(ratings)
+        df['rating'] = pd.to_numeric(df['rating'])
+        print(f"\n📈 Средняя оценка: {df['rating'].mean():.2f}/10")
+        print(f"🏆 Максимальная: {df['rating'].max()}/10")
+        print(f"📉 Минимальная: {df['rating'].min()}/10")
     else:
-        print("\n❌ Не удалось получить данные.")
+        print("\n❌ Не удалось получить данные с оценками.")
         print("Попробуйте другого пользователя, например:")
         print("   python letterboxd_parser.py dave")
