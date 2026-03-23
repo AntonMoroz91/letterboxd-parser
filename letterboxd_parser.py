@@ -1,115 +1,110 @@
-import cloudscraper
+import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import time
-import random
 from typing import List, Dict
 
-def collect_user_rates(user_login: str = "rfeldman9") -> List[Dict[str, str]]:
-    scraper = cloudscraper.create_scraper(
-        interpreter='javascript',
-        delay=15,
-        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-    )
-    
-    scraper.headers.update({
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0',
-    })
-    
-    page = 1
+def collect_user_rates_rss(user_login: str) -> List[Dict[str, str]]:
+    """
+    Парсит RSS-ленту пользователя Letterboxd (не блокируется).
+    """
+    url = f'https://letterboxd.com/{user_login}/rss/'
     data = []
-    print(f"Парсинг пользователя: {user_login}")
-
-    while True:
-        url = f'https://letterboxd.com/{user_login}/films/diary/page/{page}/'
-        print(f"Страница {page}...")
-
-        try:
-            time.sleep(random.uniform(1, 2))
-            response = scraper.get(url, timeout=30)
-            
-            if response.status_code == 403:
-                print("Блокировка, жду 5 секунд...")
-                time.sleep(5)
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
+    print(f"Парсинг RSS пользователя: {user_login}")
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            print(f"Ошибка {response.status_code}")
+            return []
+        
+        soup = BeautifulSoup(response.text, 'xml')
+        items = soup.find_all('item')
+        
+        print(f"Найдено записей в RSS: {len(items)}")
+        
+        for item in items:
+            # Название фильма
+            title = item.find('title')
+            if not title or not title.text:
                 continue
-            if response.status_code != 200:
-                break
-
-            soup = BeautifulSoup(response.text, 'lxml')
-            rows = soup.find_all('tr', class_='diary-entry-row')
-            if not rows:
-                break
-
-            for row in rows:
-                if 'not-rated' in row.get('class', []):
-                    continue
-
-                title_td = row.find('td', class_='td-film-details')
-                if not title_td:
-                    continue
-                title = title_td.find('a').text.strip()
-
-                year_td = row.find('td', class_='td-released')
-                year = year_td.text.strip() if year_td else ''
-
-                rating_td = row.find('td', class_='td-rating')
-                if not rating_td:
-                    continue
-                rating_span = rating_td.find('span', class_='rating')
-                if not rating_span:
-                    continue
-                classes = rating_span.get('class', [])
-                if len(classes) < 2:
-                    continue
-                rating = classes[1].split('-')[1]
-
+            film_name = title.text.strip()
+            
+            # Извлекаем год из названия или описания
+            year = ""
+            description = item.find('description')
+            if description and description.text:
+                import re
+                match = re.search(r'\b(19|20)\d{2}\b', description.text)
+                if match:
+                    year = match.group()
+            
+            # Извлекаем оценку из описания (звезды)
+            rating = None
+            if description and description.text:
+                stars = description.text.count('★')
+                if stars > 0:
+                    rating = str(stars)
+                elif '½' in description.text:
+                    rating = '0.5'
+            
+            if rating:
                 data.append({
-                    'film_name': title,
+                    'film_name': film_name,
                     'release_year': year,
                     'rating': rating
                 })
-
-            page += 1
-
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            break
-
-    print(f"Всего оценок: {len(data)}")
-    return data
+        
+        return data
+        
+    except Exception as e:
+        print(f"Ошибка: {e}")
+        return []
 
 def save_to_csv(data: List[Dict[str, str]], filename: str) -> None:
     if data:
         pd.DataFrame(data).to_csv(filename, index=False, encoding='utf-8')
-        print(f"Сохранено в {filename}")
+        print(f"✅ Сохранено в {filename}")
+    else:
+        print("Нет данных для сохранения")
 
 def save_to_excel(data: List[Dict[str, str]], filename: str) -> None:
     if data:
         pd.DataFrame(data).to_excel(filename, index=False)
-        print(f"Сохранено в {filename}")
+        print(f"✅ Сохранено в {filename}")
+    else:
+        print("Нет данных для сохранения")
 
 if __name__ == "__main__":
     print("="*50)
-    print("ПАРСЕР LETTERBOXD")
+    print("ПАРСЕР LETTERBOXD (RSS - не блокируется)")
     print("="*50)
     
-    ratings = collect_user_rates("rfeldman9")
+    USER_LOGIN = "rfeldman9"
+    
+    ratings = collect_user_rates_rss(USER_LOGIN)
     
     if ratings:
-        save_to_csv(ratings, "rfeldman9_rates.csv")
-        save_to_excel(ratings, "rfeldman9_rates.xlsx")
+        save_to_csv(ratings, f"{USER_LOGIN}_rates.csv")
+        save_to_excel(ratings, f"{USER_LOGIN}_rates.xlsx")
         
-        print("\nПервые 5 записей:")
+        print(f"\n📊 Всего оценок: {len(ratings)}")
+        print("\n📋 Первые 5 записей:")
         for i, r in enumerate(ratings[:5]):
             print(f"{i+1}. {r['film_name']} ({r['release_year']}) — {r['rating']}/10")
+        
+        # Статистика
+        if len(ratings) > 0:
+            df = pd.DataFrame(ratings)
+            df['rating'] = pd.to_numeric(df['rating'])
+            print(f"\n📈 Средняя оценка: {df['rating'].mean():.2f}/10")
     else:
-        print("Не удалось получить данные")
+        print("\n❌ Не удалось получить данные.")
+        print("Попробуйте другого пользователя, например:")
+        print("   python letterboxd_parser.py dave")
