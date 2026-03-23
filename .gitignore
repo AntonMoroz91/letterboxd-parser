@@ -1,6 +1,26 @@
-pycache/
-*.pyc
-.venv/
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
 venv/
-*.csv
+env/
+ENV/
+.venv
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# Output files
 *.xlsx
+*.csv
+
+# OS junk
+.DS_Store
+Thumbs.db
