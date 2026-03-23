@@ -1,125 +1,144 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import re
+import time
+import sys
 from typing import List, Dict
 
-def collect_user_rates_rss(user_login: str) -> List[Dict[str, str]]:
+def collect_user_rates(user_login: str, delay: float = 2.0) -> List[Dict[str, str]]:
     """
-    Парсит RSS-ленту пользователя Letterboxd.
+    Парсит все страницы дневника пользователя Letterboxd.
+    Извлекает название фильма, год выпуска и оценку.
     """
-    url = f'https://letterboxd.com/{user_login}/rss/'
+    page_num = 1
     data = []
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
     }
     
-    print(f"📡 Парсинг RSS пользователя: {user_login}")
+    print(f"Парсинг пользователя: {user_login}")
     
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
+    while True:
+        url = f'https://letterboxd.com/{user_login}/films/diary/page/{page_num}/'
+        print(f"Страница {page_num}...")
         
-        if response.status_code != 200:
-            print(f"❌ Ошибка {response.status_code}")
-            return []
-        
-        soup = BeautifulSoup(response.text, 'xml')
-        items = soup.find_all('item')
-        
-        print(f"📄 Найдено записей в RSS: {len(items)}")
-        
-        for item in items:
-            # Название фильма
-            title = item.find('title')
-            if not title or not title.text:
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            
+            if response.status_code == 403:
+                print(f"Блокировка, жду 10 секунд...")
+                time.sleep(10)
                 continue
-            film_name = title.text.strip()
+                
+            if response.status_code != 200:
+                print(f"Ошибка {response.status_code}")
+                break
             
-            # Извлекаем год из названия
-            year = ""
-            year_match = re.search(r'\((\d{4})\)', film_name)
-            if year_match:
-                year = year_match.group(1)
-                # Убираем год из названия
-                film_name = re.sub(r'\s*\(\d{4}\)', '', film_name)
+            soup = BeautifulSoup(response.text, 'lxml')
+            rows = soup.find_all('tr', class_='diary-entry-row')
             
-            # Извлекаем оценку из description (ищем звезды)
-            description = item.find('description')
-            rating = None
+            if not rows:
+                print(f"Достигнут конец (страница {page_num-1})")
+                break
             
-            if description and description.text:
-                desc_text = description.text
-                # Ищем звезды (★)
-                stars = desc_text.count('★')
-                if stars > 0:
-                    rating = str(stars)
-                # Проверяем половину звезды
-                elif '½' in desc_text:
-                    rating = '0.5'
-                # Если звезд нет, ищем число после "Rated "
-                else:
-                    rated_match = re.search(r'Rated\s+(\d+)/?', desc_text, re.IGNORECASE)
-                    if rated_match:
-                        rating = rated_match.group(1)
-            
-            # Добавляем только записи с оценкой
-            if rating:
+            page_films = 0
+            for row in rows:
+                if 'not-rated' in row.get('class', []):
+                    continue
+                
+                td_film = row.find('td', class_='td-film-details')
+                if not td_film:
+                    continue
+                film_name = td_film.find('a').text.strip()
+                
+                td_year = row.find('td', class_='td-released')
+                release_year = td_year.text.strip() if td_year else ''
+                
+                td_rating = row.find('td', class_='td-rating')
+                if not td_rating:
+                    continue
+                rating_span = td_rating.find('span', class_='rating')
+                if not rating_span:
+                    continue
+                classes = rating_span.get('class', [])
+                if len(classes) < 2:
+                    continue
+                rating = classes[1].split('-')[1]
+                
                 data.append({
                     'film_name': film_name,
-                    'release_year': year,
+                    'release_year': release_year,
                     'rating': rating
                 })
-                print(f"   ✅ {film_name} ({year}) — {rating}/10")
-            else:
-                print(f"   ⚠️ {film_name} — без оценки")
-        
-        return data
-        
-    except Exception as e:
-        print(f"⚠️ Ошибка: {e}")
-        return []
+                page_films += 1
+            
+            print(f"Найдено фильмов с оценками: {page_films}")
+            page_num += 1
+            time.sleep(delay)
+            
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            break
+    
+    print(f"Всего собрано оценок: {len(data)}")
+    return data
 
 def save_to_csv(data: List[Dict[str, str]], filename: str) -> None:
     if data:
         df = pd.DataFrame(data)
         df.to_csv(filename, index=False, encoding='utf-8')
-        print(f"\n💾 Сохранено в {filename}")
-        print(f"   Всего записей: {len(data)}")
-    else:
-        print("Нет данных для сохранения")
+        print(f"Сохранено в {filename} ({len(data)} записей)")
 
 def save_to_excel(data: List[Dict[str, str]], filename: str) -> None:
     if data:
         df = pd.DataFrame(data)
         df.to_excel(filename, index=False)
-        print(f"💾 Сохранено в {filename}")
+        print(f"Сохранено в {filename}")
+
+def print_stats(data: List[Dict[str, str]]) -> None:
+    if not data:
+        return
+    df = pd.DataFrame(data)
+    df['rating'] = pd.to_numeric(df['rating'])
+    
+    print("\n" + "="*50)
+    print("СТАТИСТИКА")
+    print("="*50)
+    print(f"Всего фильмов: {len(data)}")
+    print(f"Средняя оценка: {df['rating'].mean():.2f}/10")
+    print(f"Максимальная: {df['rating'].max()}/10")
+    print(f"Минимальная: {df['rating'].min()}/10")
+    
+    print("\nПервые 10 записей:")
+    for i, r in enumerate(data[:10]):
+        print(f"{i+1}. {r['film_name']} ({r['release_year']}) — {r['rating']}/10")
 
 if __name__ == "__main__":
     print("="*50)
-    print("🎬 ПАРСЕР ОЦЕНОК LETTERBOXD (RSS)")
+    print("ПАРСЕР ОЦЕНОК LETTERBOXD")
     print("="*50)
     
-    USER_LOGIN = "rfeldman9"
+    if len(sys.argv) > 1:
+        USER_LOGIN = sys.argv[1]
+    else:
+        USER_LOGIN = "rfeldman9"
     
-    ratings = collect_user_rates_rss(USER_LOGIN)
+    ratings = collect_user_rates(USER_LOGIN)
     
     if ratings:
         save_to_csv(ratings, f"{USER_LOGIN}_rates.csv")
         save_to_excel(ratings, f"{USER_LOGIN}_rates.xlsx")
-        
-        print(f"\n📊 Всего оценок: {len(ratings)}")
-        print("\n📋 Первые 5 записей:")
-        for i, r in enumerate(ratings[:5]):
-            print(f"{i+1}. {r['film_name']} ({r['release_year']}) — {r['rating']}/10")
-        
-        # Статистика
-        df = pd.DataFrame(ratings)
-        df['rating'] = pd.to_numeric(df['rating'])
-        print(f"\n📈 Средняя оценка: {df['rating'].mean():.2f}/10")
-        print(f"🏆 Максимальная: {df['rating'].max()}/10")
-        print(f"📉 Минимальная: {df['rating'].min()}/10")
+        print_stats(ratings)
     else:
-        print("\n❌ Не удалось получить данные с оценками.")
-        print("Попробуйте другого пользователя, например:")
+        print(f"\nНе удалось получить данные для {USER_LOGIN}")
+        print("Возможные причины:")
+        print("  • Сайт временно блокирует запросы")
+        print("  • У пользователя нет публичных оценок")
+        print("\nПопробуйте другого пользователя:")
         print("   python letterboxd_parser.py dave")
