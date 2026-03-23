@@ -1,4 +1,4 @@
-cloudscraper
+requests
 beautifulsoup4
 lxml
 pandas
