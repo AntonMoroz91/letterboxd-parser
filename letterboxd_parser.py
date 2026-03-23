@@ -16,53 +16,62 @@ def parse_imdb_top250() -> List[Dict[str, str]]:
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Находим блоки с фильмами
-        films = soup.find_all('li', class_='ipc-metadata-list-summary-item')
-        if not films:
-            films = soup.find_all('td', class_='titleColumn')
+        # Находим все строки таблицы с фильмами
+        films = soup.find_all('tr')
         
         data = []
-        for i, film in enumerate(films[:250], 1):
+        for film in films:
             try:
-                if film.name == 'td' and 'titleColumn' in film.get('class', []):
-                    title_link = film.find('a')
-                    title = title_link.text.strip()
-                    year_text = film.find('span', class_='secondaryInfo')
-                    year = year_text.text.strip('()') if year_text else ""
-                    rating_cell = film.find_next_sibling('td', class_='ratingColumn')
-                    rating = rating_cell.text.strip() if rating_cell else "N/A"
-                else:
-                    title_elem = film.find('h3', class_='ipc-title__text')
-                    if not title_elem:
-                        title_elem = film.find('a', class_='ipc-title-link-wrapper')
-                    title = title_elem.text.strip() if title_elem else "Unknown"
-                    if '.' in title:
-                        title = title.split('.', 1)[1].strip()
-                    year_elem = film.find('span', class_='cli-title-metadata-item')
-                    year = year_elem.text.strip() if year_elem else ""
-                    rating_elem = film.find('span', class_='ipc-rating-star')
-                    rating = rating_elem.text.split()[0] if rating_elem else "N/A"
+                # Ищем ячейку с названием
+                title_cell = film.find('td', class_='titleColumn')
+                if not title_cell:
+                    continue
                 
-                data.append({'rank': i, 'title': title, 'year': year, 'rating': rating})
-                print(f"  {i}. {title} ({year}) — {rating}")
-            except Exception as e:
-                print(f"  Ошибка при обработке фильма {i}: {e}")
+                # Название и ссылка
+                a_tag = title_cell.find('a')
+                title = a_tag.text.strip() if a_tag else "Unknown"
+                
+                # Год
+                year_span = title_cell.find('span', class_='secondaryInfo')
+                year = year_span.text.strip('()') if year_span else ""
+                
+                # Рейтинг
+                rating_cell = film.find('td', class_='ratingColumn')
+                rating = rating_cell.text.strip() if rating_cell else "N/A"
+                
+                data.append({
+                    'title': title,
+                    'year': year,
+                    'rating': rating
+                })
+                
+            except Exception:
                 continue
         
-        print(f"\nВсего собрано фильмов: {len(data)}")
+        # Добавляем rank
+        for i, item in enumerate(data, 1):
+            item['rank'] = i
+        
+        print(f"  Найдено фильмов: {len(data)}")
+        for i, f in enumerate(data[:10], 1):
+            print(f"  {i}. {f['title']} ({f['year']}) — {f['rating']}")
+        
         return data
+        
     except Exception as e:
         print(f"Ошибка: {e}")
         return []
 
 def save_to_csv(data: List[Dict[str, str]], filename: str) -> None:
     if data:
-        pd.DataFrame(data).to_csv(filename, index=False, encoding='utf-8')
+        df = pd.DataFrame(data)
+        df.to_csv(filename, index=False, encoding='utf-8')
         print(f"Сохранено в {filename} ({len(data)} записей)")
 
 def save_to_excel(data: List[Dict[str, str]], filename: str) -> None:
     if data:
-        pd.DataFrame(data).to_excel(filename, index=False)
+        df = pd.DataFrame(data)
+        df.to_excel(filename, index=False)
         print(f"Сохранено в {filename}")
 
 def print_stats(data: List[Dict[str, str]]) -> None:
