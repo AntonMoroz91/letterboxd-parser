@@ -1,102 +1,115 @@
+import cloudscraper
+from bs4 import BeautifulSoup
 import pandas as pd
-import json
+import time
+import random
 from typing import List, Dict
 
-# Реальные данные из Letterboxd (из вашего первого сообщения)
-SAMPLE_DATA = [
-    {"film_name": "The Nice Guys", "release_date": "2016", "rating": "9"},
-    {"film_name": "Last Action Hero", "release_date": "1993", "rating": "7"},
-    {"film_name": "Tokyo Godfathers", "release_date": "2003", "rating": "10"},
-    {"film_name": "Perfect Blue", "release_date": "1997", "rating": "10"},
-    {"film_name": "Paprika", "release_date": "2006", "rating": "9"},
-    {"film_name": "Heat", "release_date": "1995", "rating": "8"},
-    {"film_name": "The Insider", "release_date": "1999", "rating": "8"},
-    {"film_name": "Miami Vice", "release_date": "2006", "rating": "7"},
-    {"film_name": "Collateral", "release_date": "2004", "rating": "8"},
-    {"film_name": "Manhunter", "release_date": "1986", "rating": "8"},
-]
+def collect_user_rates(user_login: str = "rfeldman9") -> List[Dict[str, str]]:
+    scraper = cloudscraper.create_scraper(
+        interpreter='javascript',
+        delay=15,
+        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
+    )
+    
+    scraper.headers.update({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+    })
+    
+    page = 1
+    data = []
+    print(f"Парсинг пользователя: {user_login}")
 
+    while True:
+        url = f'https://letterboxd.com/{user_login}/films/diary/page/{page}/'
+        print(f"Страница {page}...")
 
-def collect_user_rates(user_login: str) -> List[Dict[str, str]]:
-    """
-    Возвращает тестовые данные для указанного пользователя.
-    В реальном проекте здесь был бы парсинг, но сейчас используем образец.
-    """
-    print(f"Получаем данные для пользователя: {user_login}")
-    print(f"Найдено записей: {len(SAMPLE_DATA)}")
-    return SAMPLE_DATA
+        try:
+            time.sleep(random.uniform(1, 2))
+            response = scraper.get(url, timeout=30)
+            
+            if response.status_code == 403:
+                print("Блокировка, жду 5 секунд...")
+                time.sleep(5)
+                continue
+            if response.status_code != 200:
+                break
 
+            soup = BeautifulSoup(response.text, 'lxml')
+            rows = soup.find_all('tr', class_='diary-entry-row')
+            if not rows:
+                break
 
-def analyze_ratings(data: List[Dict[str, str]]) -> Dict:
-    """Анализирует оценки и возвращает статистику"""
-    df = pd.DataFrame(data)
-    df['rating'] = pd.to_numeric(df['rating'])
+            for row in rows:
+                if 'not-rated' in row.get('class', []):
+                    continue
 
-    stats = {
-        'total_films': len(df),
-        'average_rating': df['rating'].mean(),
-        'max_rating': df['rating'].max(),
-        'min_rating': df['rating'].min(),
-        'ratings_distribution': df['rating'].value_counts().sort_index().to_dict(),
-        'films_by_year': df['release_date'].value_counts().head(5).to_dict()
-    }
-    return stats
+                title_td = row.find('td', class_='td-film-details')
+                if not title_td:
+                    continue
+                title = title_td.find('a').text.strip()
 
+                year_td = row.find('td', class_='td-released')
+                year = year_td.text.strip() if year_td else ''
+
+                rating_td = row.find('td', class_='td-rating')
+                if not rating_td:
+                    continue
+                rating_span = rating_td.find('span', class_='rating')
+                if not rating_span:
+                    continue
+                classes = rating_span.get('class', [])
+                if len(classes) < 2:
+                    continue
+                rating = classes[1].split('-')[1]
+
+                data.append({
+                    'film_name': title,
+                    'release_year': year,
+                    'rating': rating
+                })
+
+            page += 1
+
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            break
+
+    print(f"Всего оценок: {len(data)}")
+    return data
 
 def save_to_csv(data: List[Dict[str, str]], filename: str) -> None:
-    """Сохраняет данные в CSV"""
-    df = pd.DataFrame(data)
-    df.to_csv(filename, index=False, encoding='utf-8')
-    print(f"✅ Данные сохранены в {filename}")
-
+    if data:
+        pd.DataFrame(data).to_csv(filename, index=False, encoding='utf-8')
+        print(f"Сохранено в {filename}")
 
 def save_to_excel(data: List[Dict[str, str]], filename: str) -> None:
-    """Сохраняет данные в Excel"""
-    df = pd.DataFrame(data)
-    df.to_excel(filename, index=False)
-    print(f"✅ Данные сохранены в {filename}")
-
-
-def print_statistics(stats: Dict) -> None:
-    """Выводит статистику"""
-    print("\n" + "=" * 50)
-    print("📊 СТАТИСТИКА ОЦЕНОК")
-    print("=" * 50)
-    print(f"🎬 Всего фильмов: {stats['total_films']}")
-    print(f"⭐ Средняя оценка: {stats['average_rating']:.2f}/10")
-    print(f"🏆 Максимальная оценка: {stats['max_rating']}/10")
-    print(f"📉 Минимальная оценка: {stats['min_rating']}/10")
-
-    print("\n📈 Распределение оценок:")
-    for rating, count in stats['ratings_distribution'].items():
-        print(f"  {rating}/10: {'★' * count} ({count})")
-
-    print("\n📅 Топ-5 годов выпуска:")
-    for year, count in stats['films_by_year'].items():
-        print(f"  {year}: {count} фильмов")
-    print("=" * 50)
-
+    if data:
+        pd.DataFrame(data).to_excel(filename, index=False)
+        print(f"Сохранено в {filename}")
 
 if __name__ == "__main__":
-    print("🎬 ПАРСЕР ОЦЕНОК LETTERBOXD")
-    print("=" * 50)
-
-    # Получаем данные для пользователя
-    user_login = "rfeldman9"
-    ratings = collect_user_rates(user_login)
-
+    print("="*50)
+    print("ПАРСЕР LETTERBOXD")
+    print("="*50)
+    
+    ratings = collect_user_rates("rfeldman9")
+    
     if ratings:
-        # Сохраняем в файлы
-        save_to_csv(ratings, f"{user_login}_rates.csv")
-        save_to_excel(ratings, f"{user_login}_rates.xlsx")
-
-        # Анализируем и выводим статистику
-        stats = analyze_ratings(ratings)
-        print_statistics(stats)
-
-        print(f"\n✅ Проект успешно выполнен!")
-        print(f"📁 Файлы сохранены:")
-        print(f"   - {user_login}_rates.csv")
-        print(f"   - {user_login}_rates.xlsx")
+        save_to_csv(ratings, "rfeldman9_rates.csv")
+        save_to_excel(ratings, "rfeldman9_rates.xlsx")
+        
+        print("\nПервые 5 записей:")
+        for i, r in enumerate(ratings[:5]):
+            print(f"{i+1}. {r['film_name']} ({r['release_year']}) — {r['rating']}/10")
     else:
-        print("❌ Не удалось получить данные")
+        print("Не удалось получить данные")
