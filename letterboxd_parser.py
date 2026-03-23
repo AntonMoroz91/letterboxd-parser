@@ -76,7 +76,7 @@ if __name__ == "__main__":
     print("ПАРСЕР ОЦЕНОК LETTERBOXD")
     print("="*50)
     
-    USER = "dave"
+    USER = "chriswinters"
     ratings = collect_user_rates(USER)
     
     if ratings:
