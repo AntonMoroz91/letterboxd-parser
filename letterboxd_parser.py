@@ -1,55 +1,33 @@
-import requests
 import pandas as pd
-import xml.etree.ElementTree as ET
-import re
-from typing import List, Dict
+from imdb import Cinemagoer
 
-def collect_user_rates(user_login: str) -> List[Dict[str, str]]:
-    """Парсит RSS-ленту пользователя Letterboxd."""
-    url = f'https://letterboxd.com/{user_login}/rss/'
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+def get_top_250_movies():
+    """Получает топ-250 фильмов через IMDb API."""
+    ia = Cinemagoer()
     
-    print(f"Парсинг пользователя: {user_login}")
+    print("Получение топ-250 фильмов IMDb...")
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        
-        root = ET.fromstring(response.content)
-        ns = {'atom': 'http://www.w3.org/2005/Atom'}
-        entries = root.findall('.//atom:entry', ns)
+        top250 = ia.get_top250_movies()
         
         data = []
-        for entry in entries:
-            title_elem = entry.find('atom:title', ns)
-            if title_elem is None:
-                continue
-            full_title = title_elem.text
-            
-            year_match = re.search(r'\((\d{4})\)', full_title)
-            year = year_match.group(1) if year_match else ""
-            title = re.sub(r'\s*\(\d{4}\)', '', full_title)
-            
-            summary = entry.find('atom:summary', ns)
-            rating = None
-            if summary is not None and summary.text:
-                star_count = summary.text.count('★')
-                if star_count > 0:
-                    rating = str(star_count)
-                elif '½' in summary.text:
-                    rating = '0.5'
-            
-            if rating:
-                data.append({'film_name': title, 'year': year, 'rating': rating})
-                print(f"  {title} ({year}) — {rating}/10")
+        for i, movie in enumerate(top250[:100], 1):
+            data.append({
+                'rank': i,
+                'title': movie['title'],
+                'year': movie.get('year', ''),
+                'rating': movie.get('rating', 'N/A')
+            })
+            print(f"  {i}. {movie['title']} ({movie.get('year', '')}) — {movie.get('rating', 'N/A')}")
         
-        print(f"\nВсего оценок: {len(data)}")
+        print(f"\nВсего собрано фильмов: {len(data)}")
         return data
+        
     except Exception as e:
         print(f"Ошибка: {e}")
         return []
 
-def save_results(data: List[Dict[str, str]], login: str):
+def save_results(data, login):
     if not data:
         print("Нет данных")
         return
@@ -59,27 +37,30 @@ def save_results(data: List[Dict[str, str]], login: str):
     df.to_excel(f"{login}_rates.xlsx", index=False)
     print(f"Сохранено в {login}_rates.csv и {login}_rates.xlsx ({len(data)} записей)")
     
-    df['rating'] = pd.to_numeric(df['rating'])
+    df['rating'] = pd.to_numeric(df['rating'], errors='coerce')
     print("\n" + "="*50)
     print("СТАТИСТИКА")
     print("="*50)
     print(f"Всего фильмов: {len(data)}")
-    print(f"Средняя оценка: {df['rating'].mean():.2f}/10")
-    print(f"Максимальная: {df['rating'].max()}/10")
-    print(f"Минимальная: {df['rating'].min()}/10")
+    
+    ratings = df[df['rating'].notna()]['rating']
+    if len(ratings) > 0:
+        print(f"Средний рейтинг: {ratings.mean():.2f}/10")
+        print(f"Максимальный: {ratings.max()}/10")
+        print(f"Минимальный: {ratings.min()}/10")
+    
     print("\nПервые 10 записей:")
     for i, r in enumerate(data[:10]):
-        print(f"{i+1}. {r['film_name']} ({r['year']}) — {r['rating']}/10")
+        print(f"{i+1}. {r['title']} ({r['year']}) — {r['rating']}/10")
 
 if __name__ == "__main__":
     print("="*50)
-    print("ПАРСЕР ОЦЕНОК LETTERBOXD")
+    print("ПАРСЕР IMDb TOP 250")
     print("="*50)
     
-    USER = "chriswinters"
-    ratings = collect_user_rates(USER)
+    movies = get_top_250_movies()
     
-    if ratings:
-        save_results(ratings, USER)
+    if movies:
+        save_results(movies, "imdb_top250")
     else:
-        print(f"Не удалось получить данные для {USER}")
+        print("Не удалось получить данные")
