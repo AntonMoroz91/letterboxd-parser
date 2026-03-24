@@ -4,6 +4,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 def setup_driver():
@@ -19,6 +21,15 @@ def setup_driver():
     return driver
 
 def collect_user_ratings(user_login):
+    """
+    Собирает все оценки пользователя Letterboxd.
+    
+    Args:
+        user_login (str): Логин пользователя Letterboxd
+        
+    Returns:
+        list: Список словарей с ключами film_name, release_date, rating
+    """
     driver = setup_driver()
     data = []
     page_num = 1
@@ -31,6 +42,14 @@ def collect_user_ratings(user_login):
             driver.get(url)
             time.sleep(3)
             
+            # Ждем загрузки таблицы
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "table.diary-table"))
+                )
+            except:
+                pass
+            
             rows = driver.find_elements(By.CSS_SELECTOR, "tr.diary-entry-row")
             
             if not rows:
@@ -41,14 +60,21 @@ def collect_user_ratings(user_login):
             
             for row in rows:
                 try:
-                    film_elem = row.find_element(By.CSS_SELECTOR, "td a[href*='/film/']")
-                    film_name = film_elem.text.strip()
+                    # Название фильма
+                    film_name = None
+                    name_elem = row.find_elements(By.CSS_SELECTOR, ".film-title, a[href*='/film/']")
+                    if name_elem:
+                        film_name = name_elem[0].text.strip()
                     
-                    year_elem = row.find_elements(By.CSS_SELECTOR, "td.released, td.td-released")
-                    release_date = year_elem[0].text.strip() if year_elem else None
+                    # Год выпуска
+                    release_date = None
+                    year_elem = row.find_elements(By.CSS_SELECTOR, ".released, .td-released")
+                    if year_elem:
+                        release_date = year_elem[0].text.strip()
                     
+                    # Оценка
                     rating = None
-                    rating_elem = row.find_elements(By.CSS_SELECTOR, "td.rating span.rating, td.td-rating span.rating")
+                    rating_elem = row.find_elements(By.CSS_SELECTOR, ".rating")
                     if rating_elem:
                         classes = rating_elem[0].get_attribute("class")
                         if classes and "rated-" in classes:
@@ -56,15 +82,17 @@ def collect_user_ratings(user_login):
                                 if cls.startswith("rated-"):
                                     rating = int(cls.split("-")[1])
                     
-                    data.append({
-                        'film_name': film_name,
-                        'release_date': release_date,
-                        'rating': rating
-                    })
-                    print(f"  ✅ {film_name} ({release_date}) - {rating if rating else 'нет оценки'}")
+                    if film_name:
+                        data.append({
+                            'film_name': film_name,
+                            'release_date': release_date,
+                            'rating': rating
+                        })
+                        print(f"  ✅ {film_name} ({release_date}) - {rating if rating else 'нет оценки'}")
+                    else:
+                        print(f"  ⚠️ Пропущена запись без названия")
                     
                 except Exception as e:
-                    print(f"  ❌ Ошибка: {e}")
                     continue
             
             page_num += 1
@@ -78,14 +106,33 @@ def collect_user_ratings(user_login):
     return data
 
 def save_to_excel(data, filename='user_ratings.xlsx'):
+    """Сохраняет данные в Excel файл"""
     df = pd.DataFrame(data)
     df.to_excel(filename, index=False)
+    print(f"Сохранено {len(data)} записей в {filename}")
+
+def save_to_csv(data, filename='user_ratings.csv'):
+    """Сохраняет данные в CSV файл"""
+    df = pd.DataFrame(data)
+    df.to_csv(filename, index=False, encoding='utf-8')
+    print(f"Сохранено {len(data)} записей в {filename}")
+
+def save_to_json(data, filename='user_ratings.json'):
+    """Сохраняет данные в JSON файл"""
+    df = pd.DataFrame(data)
+    df.to_json(filename, orient='records', force_ascii=False, indent=2)
     print(f"Сохранено {len(data)} записей в {filename}")
 
 def main():
     print("=" * 50)
     print("Letterboxd User Ratings Parser")
     print("=" * 50)
+    print("\nДанный парсер собирает информацию о фильмах из дневника пользователя Letterboxd:")
+    print("- Название фильма")
+    print("- Год выпуска")
+    print("- Оценка пользователя (от 1 до 10)")
+    print("\nРезультат может быть использован для построения рекомендательных систем,")
+    print("анализа предпочтений или создания персональной базы просмотренных фильмов.\n")
     
     user_login = input("Введите логин пользователя Letterboxd: ").strip()
     if not user_login:
@@ -98,16 +145,32 @@ def main():
     ratings = collect_user_ratings(user_login)
     
     if not ratings:
-        print("\n❌ Ничего не найдено. Проверьте логин.")
+        print("\n❌ Ничего не найдено. Проверьте:")
+        print("1. Правильно ли введен логин")
+        print("2. Есть ли у пользователя дневник с фильмами")
+        print("3. Проверьте подключение к интернету")
         return
     
     print(f"\n✅ Собрано {len(ratings)} записей!")
+    
+    print("\nВыберите формат сохранения:")
+    print("1. Excel (.xlsx)")
+    print("2. CSV (.csv)")
+    print("3. JSON (.json)")
+    
+    format_choice = input("Введите номер (1-3) [1]: ").strip()
     
     filename = input("\nИмя файла [user_ratings]: ").strip()
     if not filename:
         filename = "user_ratings"
     
-    save_to_excel(ratings, f"{filename}.xlsx")
+    if format_choice == "2":
+        save_to_csv(ratings, f"{filename}.csv")
+    elif format_choice == "3":
+        save_to_json(ratings, f"{filename}.json")
+    else:
+        save_to_excel(ratings, f"{filename}.xlsx")
+    
     print("\n🎉 Готово!")
 
 if __name__ == '__main__':
