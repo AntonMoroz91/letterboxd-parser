@@ -23,19 +23,19 @@ python letterboxd_parser.py
 
 Для пользователя rfeldman9 собрано 782 записи:
 
-Train Dreams (2025) - 9
-Frankenstein (2025) - 8
-28 Years Later: The Bone Temple (2025) - 9
-Bugonia (2025) - 9
-People We Meet on Vacation (2025) - 8
+- Train Dreams (2025) - 9
+- Frankenstein (2025) - 8
+- 28 Years Later: The Bone Temple (2025) - 9
+- Bugonia (2025) - 9
+- People We Meet on Vacation (2025) - 8
 
 ## Структура проекта
-letterboxd-parser/
-.gitignore
-README.md
-requirements.txt
-letterboxd_parser.py
-rfeldman9.xlsx
+
+- .gitignore
+- README.md
+- requirements.txt
+- letterboxd_parser.py
+- rfeldman9.xlsx
 
 ## Используемые технологии
 - Python 3.11+
