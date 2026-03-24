@@ -1,96 +1,114 @@
 import time
-import requests
-from bs4 import BeautifulSoup
 import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-}
-
-def get_soup(url):
-    try:
-        response = requests.get(url, headers=HEADERS)
-        response.raise_for_status()
-        return BeautifulSoup(response.text, 'lxml')
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching {url}: {e}")
-        return None
-
-def extract_rating(entry):
-    td_rating = entry.find('td', class_='td-rating')
-    if not td_rating:
-        return None
-    rating_span = td_rating.find('span', class_='rating')
-    if not rating_span:
-        return None
-    for cls in rating_span.get('class', []):
-        if cls.startswith('rated-'):
-            try:
-                return int(cls.split('-')[1])
-            except (IndexError, ValueError):
-                return None
-    return None
+def setup_driver():
+    chrome_options = Options()
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
+    
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=chrome_options
+    )
+    return driver
 
 def collect_user_ratings(user_login):
-    page_num = 1
+    driver = setup_driver()
     data = []
-    while True:
-        url = f'https://letterboxd.com/{user_login}/films/diary/page/{page_num}/'
-        print(f"Fetching {url}")
-        soup = get_soup(url)
-        if not soup:
-            break
-        entries = soup.find_all('tr', class_='diary-entry-row viewing-poster-container')
-        if not entries:
-            break
-        for entry in entries:
-            td_details = entry.find('td', class_='td-film-details')
-            if td_details:
-                name_tag = td_details.find('a')
-                film_name = name_tag.text.strip() if name_tag else None
-            else:
-                film_name = None
-            td_released = entry.find('td', class_='td-released center')
-            release_date = td_released.text.strip() if td_released else None
-            rating = extract_rating(entry)
-            if film_name:
-                data.append({
-                    'film_name': film_name,
-                    'release_date': release_date,
-                    'rating': rating
-                })
-        page_num += 1
-        time.sleep(1)
+    page_num = 1
+    
+    try:
+        while True:
+            url = f"https://letterboxd.com/{user_login}/films/diary/page/{page_num}/"
+            print(f"Загружаю {url}")
+            
+            driver.get(url)
+            time.sleep(3)
+            
+            rows = driver.find_elements(By.CSS_SELECTOR, "tr.diary-entry-row")
+            
+            if not rows:
+                print("Записи не найдены, завершаем")
+                break
+            
+            print(f"Найдено {len(rows)} записей на странице {page_num}")
+            
+            for row in rows:
+                try:
+                    film_elem = row.find_element(By.CSS_SELECTOR, "td a[href*='/film/']")
+                    film_name = film_elem.text.strip()
+                    
+                    year_elem = row.find_elements(By.CSS_SELECTOR, "td.released, td.td-released")
+                    release_date = year_elem[0].text.strip() if year_elem else None
+                    
+                    rating = None
+                    rating_elem = row.find_elements(By.CSS_SELECTOR, "td.rating span.rating, td.td-rating span.rating")
+                    if rating_elem:
+                        classes = rating_elem[0].get_attribute("class")
+                        if classes and "rated-" in classes:
+                            for cls in classes.split():
+                                if cls.startswith("rated-"):
+                                    rating = int(cls.split("-")[1])
+                    
+                    data.append({
+                        'film_name': film_name,
+                        'release_date': release_date,
+                        'rating': rating
+                    })
+                    print(f"  ✅ {film_name} ({release_date}) - {rating if rating else 'нет оценки'}")
+                    
+                except Exception as e:
+                    print(f"  ❌ Ошибка: {e}")
+                    continue
+            
+            page_num += 1
+            time.sleep(2)
+            
+    except Exception as e:
+        print(f"Ошибка: {e}")
+    finally:
+        driver.quit()
+    
     return data
 
 def save_to_excel(data, filename='user_ratings.xlsx'):
     df = pd.DataFrame(data)
     df.to_excel(filename, index=False)
-    print(f"Saved {len(data)} records to {filename}")
-
-def save_to_csv(data, filename='user_ratings.csv'):
-    df = pd.DataFrame(data)
-    df.to_csv(filename, index=False, encoding='utf-8')
-    print(f"Saved {len(data)} records to {filename}")
+    print(f"Сохранено {len(data)} записей в {filename}")
 
 def main():
+    print("=" * 50)
     print("Letterboxd User Ratings Parser")
-    user_login = input("Enter Letterboxd username: ").strip()
+    print("=" * 50)
+    
+    user_login = input("Введите логин пользователя Letterboxd: ").strip()
     if not user_login:
-        print("Username cannot be empty.")
+        print("Логин не может быть пустым")
         return
-    print(f"Collecting ratings for user '{user_login}'...")
+    
+    print(f"\nСобираю оценки для пользователя '{user_login}'...")
+    print("Сейчас откроется браузер, НЕ закрывайте его\n")
+    
     ratings = collect_user_ratings(user_login)
+    
     if not ratings:
-        print("No ratings found. Check username or network.")
+        print("\n❌ Ничего не найдено. Проверьте логин.")
         return
-    print(f"Collected {len(ratings)} entries.")
-    save_format = input("Save as (excel/csv): ").strip().lower()
-    filename = input("Output filename (without extension): ").strip() or "user_ratings"
-    if save_format == 'csv':
-        save_to_csv(ratings, f"{filename}.csv")
-    else:
-        save_to_excel(ratings, f"{filename}.xlsx")
+    
+    print(f"\n✅ Собрано {len(ratings)} записей!")
+    
+    filename = input("\nИмя файла [user_ratings]: ").strip()
+    if not filename:
+        filename = "user_ratings"
+    
+    save_to_excel(ratings, f"{filename}.xlsx")
+    print("\n🎉 Готово!")
 
 if __name__ == '__main__':
     main()
